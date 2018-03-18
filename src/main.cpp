@@ -1,119 +1,148 @@
-#include <Arduino.h>
 #include <ArduinoJson.h>
-#include <ESP8266WiFiMulti.h>
-#include <ESP8266WiFi.h>
 #include <WebSocketsClient.h>
-#include <Hash.h>
-const char* ssid = "Tommy's iPhone";
-const char* password = "18615292015";
-char host[] = "sleepy-beyond-26290.herokuapp.com";
-int port = 80;
+#include "ThingSpeak.h"
+#include "config.h"
+unsigned long myChannelNumber = 449055;
+const char * myWriteAPIKey = "GATS3K9WRX380X84";
+int current = 0;
+int last = 0;
+float voltage = 10.2;
+WiFiClient client;
+char host[] = "test-project-w.herokuapp.com";
 int pingCount = 0;
-String currentState;
+int port = 80;
 char path[] = "/ws";
-ESP8266WiFiMulti WiFiMulti;
 WebSocketsClient webSocket;
 DynamicJsonBuffer jsonBuffer;
-
+bool toggle = false;
+void timer0_ISR()
+{
+	if (toggle)
+	{
+		digitalWrite(2, HIGH);
+		toggle = false;
+	}
+	else
+	{
+		digitalWrite(2, LOW);
+		toggle = true;
+	}
+	timer0_write(ESP.getCycleCount() + 80000000L * 15);
+}
 void processWebScoketRequest(String data)
 {
-  JsonObject& root = jsonBuffer.parseObject(data);
-  String device = (const char*)root["device"];
-  String location = (const char*)root["location"];
-  String state = (const char*)root["state"];
-  String query = (const char*)root["query"];
-  String message = "";
-  Serial.println(data);
-  Serial.println(state);
-  if (query=="cmd")
-  {
-    Serial.println("Recived command!");
-    if (state="on")
-    {
-      digitalWrite(2, HIGH);
-      delay(500);
-      digitalWrite(2,LOW);
-      currentState = "ON";
-    }
-    else
-    {
-      digitalWrite(2, LOW);
-      delay(1000);
-      digitalWrite(2,HIGH);
-      message = "{\"state\":\"OFF\"}";
-      currentState = "OFF";
-    }
-  }
-  else if(query=="?")
-  {
-    Serial.println("Recived query!");
-    int state = digitalRead(2);
-    if (currentState=="ON")
-    {
-      message = "{\"state\":\"ON\"}";
-    }
-    else
-    {
-      message = "{\"state\":\"OFF\"}";
-    }
-  }
-  else
-  {
-    Serial.println("Command is not recognized");
-  }
-  Serial.println("Sending response back");
-  Serial.println(message);
-  webSocket.sendTXT(message);
+	String jsonResponse = "{\"version\": \"1.0\",\"sessionAttributes\": {},\"response\": {\"outputSpeech\": {\"type\": \"PlainText\",\"text\": \"<text>\"},\"shouldEndSession\": true}}";
+	JsonObject& req = jsonBuffer.parseObject(data);
+	String type = req["type"];
+	Serial.println(type);
+	Serial.println("Data-->" + data);
+	if (type == "LaunchRequest")
+	{
+		Serial.println("Recieved LaunchRequest!");
+		jsonResponse.replace("<text>", "Welcome to the solar manager skill. You can monitor your solar station by saying, report the station's status");
+		jsonResponse.replace("true", "false");
+		Serial.print("Sending response back");
+		Serial.println(jsonResponse);
+		webSocket.sendTXT(jsonResponse);
+	}
+	else if (type == "IntentRequest")
+	{
+		String query = req["query"];
+		if (query == "status")
+		{
+			Serial.println("Recieved query!");
+			jsonResponse.replace("<text>", "All looks good");
+			Serial.print("Sending response back");
+			Serial.println(jsonResponse);
+			webSocket.sendTXT(jsonResponse);
+		}
+		else if (query == "temperature")
+		{
+			Serial.println("Recieved command!");
+			jsonResponse.replace("<text>", "Don't worry, solar panel's temperature is 26 degrees celsius");
+			Serial.print("Sending response back");
+			Serial.println(jsonResponse);
+			webSocket.sendTXT(jsonResponse);
+		}
+		else
+		{
+			Serial.println("Command is not recognized!");
+			jsonResponse.replace("<text>", "Command is not recognized by garage door Alexa skill");
+			Serial.print("Sending response back");
+			Serial.println(jsonResponse);
+			webSocket.sendTXT(jsonResponse);
+		}
+	}
+	else
+	{
+		Serial.println("Command is not recognized!");
+		jsonResponse.replace("<text>", "Command is not recognized by garage door Alexa skill");
+		Serial.print("Sending response back");
+		Serial.println(jsonResponse);
+		webSocket.sendTXT(jsonResponse);
+	}
+	webSocket.sendTXT(jsonResponse);
 }
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length)
 {
-  switch (type)
-  {
-    case WStype_DISCONNECTED:
-      Serial.println("Disconnected! ");
-      Serial.println("Connecting...");
-      webSocket.begin(host, port, path);
-      webSocket.onEvent(webSocketEvent);
-      break;
-    case WStype_CONNECTED:
-      Serial.println("Connected to heroku service! ");
-      webSocket.sendTXT("connected");
-      break;
-    case WStype_TEXT:
-      Serial.println("Got data");
-      processWebScoketRequest((char*)payload);
-      break;
-  }
+	switch (type) {
+	case WStype_DISCONNECTED:
+		Serial.println("Disconnected! ");
+		break;
+	case WStype_CONNECTED:
+	{
+		Serial.println("Connected! ");
+		webSocket.sendTXT("Connected");
+	}
+	break;
+	case WStype_TEXT:
+	{
+		Serial.println("Got data");
+		processWebScoketRequest((char*)payload);
+	}
+	break;
+	case WStype_BIN:
+		hexdump(payload, length);
+		Serial.print("Got bin");
+		break;
+	}
 }
 void setup()
 {
-  Serial.begin(115200);
-  Serial.setDebugOutput(false);
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  WiFiMulti.addAP(ssid, password);
-  while (WiFiMulti.run()!=WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(100);
-  }
-  Serial.println("Connected to WiFi");
-  webSocket.begin(host, port, path);
-  webSocket.onEvent(webSocketEvent);
+	pinMode(2, OUTPUT);
+	pinMode(BUTTON_PIN, INPUT_PULLUP);
+	pinMode(LED_PIN, OUTPUT);
+	Serial.begin(115200);
+	Serial.setDebugOutput(true);
+	setupWiFi();
+	setupAdafruitIO();
+	webSocket.begin(host, port, path);
+	webSocket.onEvent(webSocketEvent);
+	noInterrupts();
+	timer0_isr_init();
+	timer0_attachInterrupt(timer0_ISR);
+	timer0_write(ESP.getCycleCount() + 80000000 * 15);
+	interrupts();
+	ThingSpeak.begin(client);
 }
-
 void loop()
 {
-  webSocket.loop();
-  delay(2000);
-  if (pingCount > 20)
-  {
-    pingCount = 0;
-    webSocket.sendTXT("\"heartbeat\":\"keepalive\"");
-  }
-  else
-  {
-    pingCount += 1;
-  }
+	webSocket.loop();
+	if (toggle)
+	{
+		voltage += 12.36;
+		Serial.println(voltage);
+		ThingSpeak.writeField(myChannelNumber, 2, voltage, myWriteAPIKey);
+	}
+	io.run();
+	if (digitalRead(BUTTON_PIN) == LOW)
+		current = 1;
+	else
+		current = 0;
+	if (current == last)
+		return;
+	Serial.print("sending button -> ");
+	Serial.println(current);
+  sendMessageToAIO(current);
+	last = current;
 }
