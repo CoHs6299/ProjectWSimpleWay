@@ -132,7 +132,9 @@ void loop()
 	{
 		voltage += 12.36;
 		Serial.println(voltage);
-		ThingSpeak.writeField(myChannelNumber, 2, voltage, myWriteAPIKey);
+		ThingSpeak.setField(1, 25);
+		ThingSpeak.setField(6, 23);
+		ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
 	}
 	io.run();
 	if (digitalRead(BUTTON_PIN) == LOW)
