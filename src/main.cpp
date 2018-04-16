@@ -1,20 +1,19 @@
-#include <ArduinoJson.h>
-#include <WebSocketsClient.h>
 #include "ThingSpeak.h"
 #include "config.h"
-unsigned long myChannelNumber = 449055;
-const char * myWriteAPIKey = "GATS3K9WRX380X84";
+
 int current = 0;
 int last = 0;
-float voltage = 10.2;
+
+char recData[9];
+int counter = 0;
+int sensorData[6];
+
 WiFiClient client;
-char host[] = "test-project-w.herokuapp.com";
-int pingCount = 0;
-int port = 80;
-char path[] = "/ws";
-WebSocketsClient webSocket;
-DynamicJsonBuffer jsonBuffer;
 bool toggle = false;
+bool sign = false;
+bool timeRequest = false;
+bool alarm = false;
+
 void timer0_ISR()
 {
 	if (toggle)
@@ -29,84 +28,7 @@ void timer0_ISR()
 	}
 	timer0_write(ESP.getCycleCount() + 80000000L * 15);
 }
-void processWebScoketRequest(String data)
-{
-	String jsonResponse = "{\"version\": \"1.0\",\"sessionAttributes\": {},\"response\": {\"outputSpeech\": {\"type\": \"PlainText\",\"text\": \"<text>\"},\"shouldEndSession\": true}}";
-	JsonObject& req = jsonBuffer.parseObject(data);
-	String type = req["type"];
-	Serial.println(type);
-	Serial.println("Data-->" + data);
-	if (type == "LaunchRequest")
-	{
-		Serial.println("Recieved LaunchRequest!");
-		jsonResponse.replace("<text>", "Welcome to the solar manager skill. You can monitor your solar station by saying, report the station's status");
-		jsonResponse.replace("true", "false");
-		Serial.print("Sending response back");
-		Serial.println(jsonResponse);
-		webSocket.sendTXT(jsonResponse);
-	}
-	else if (type == "IntentRequest")
-	{
-		String query = req["query"];
-		if (query == "status")
-		{
-			Serial.println("Recieved query!");
-			jsonResponse.replace("<text>", "All looks good");
-			Serial.print("Sending response back");
-			Serial.println(jsonResponse);
-			webSocket.sendTXT(jsonResponse);
-		}
-		else if (query == "temperature")
-		{
-			Serial.println("Recieved command!");
-			jsonResponse.replace("<text>", "Don't worry, solar panel's temperature is 26 degrees celsius");
-			Serial.print("Sending response back");
-			Serial.println(jsonResponse);
-			webSocket.sendTXT(jsonResponse);
-		}
-		else
-		{
-			Serial.println("Command is not recognized!");
-			jsonResponse.replace("<text>", "Command is not recognized by garage door Alexa skill");
-			Serial.print("Sending response back");
-			Serial.println(jsonResponse);
-			webSocket.sendTXT(jsonResponse);
-		}
-	}
-	else
-	{
-		Serial.println("Command is not recognized!");
-		jsonResponse.replace("<text>", "Command is not recognized by garage door Alexa skill");
-		Serial.print("Sending response back");
-		Serial.println(jsonResponse);
-		webSocket.sendTXT(jsonResponse);
-	}
-	webSocket.sendTXT(jsonResponse);
-}
-void webSocketEvent(WStype_t type, uint8_t * payload, size_t length)
-{
-	switch (type) {
-	case WStype_DISCONNECTED:
-		Serial.println("Disconnected! ");
-		break;
-	case WStype_CONNECTED:
-	{
-		Serial.println("Connected! ");
-		webSocket.sendTXT("Connected");
-	}
-	break;
-	case WStype_TEXT:
-	{
-		Serial.println("Got data");
-		processWebScoketRequest((char*)payload);
-	}
-	break;
-	case WStype_BIN:
-		hexdump(payload, length);
-		Serial.print("Got bin");
-		break;
-	}
-}
+
 void setup()
 {
 	pinMode(2, OUTPUT);
@@ -116,35 +38,70 @@ void setup()
 	Serial.setDebugOutput(true);
 	setupWiFi();
 	setupAdafruitIO();
-	webSocket.begin(host, port, path);
-	webSocket.onEvent(webSocketEvent);
+
 	noInterrupts();
 	timer0_isr_init();
 	timer0_attachInterrupt(timer0_ISR);
 	timer0_write(ESP.getCycleCount() + 80000000 * 15);
 	interrupts();
+
 	ThingSpeak.begin(client);
 }
 void loop()
 {
-	webSocket.loop();
+	Serial.println(ThingSpeak.readIntField(commandChannelNumber, 2));
 	if (toggle)
 	{
-		voltage += 12.36;
-		Serial.println(voltage);
-		ThingSpeak.setField(1, 25);
-		ThingSpeak.setField(6, 23);
+		for (size_t i = 1; i < 7; i++)
+		{
+			ThingSpeak.setField(i, sensorData[(i-1)]);
+		}
 		ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
 	}
 	io.run();
-	if (digitalRead(BUTTON_PIN) == LOW)
-		current = 1;
-	else
-		current = 0;
-	if (current == last)
+	if (alarm == true)
+	{
+		Serial.println("Sending alarm message...");
+		sendMessageToAIO(1);
+	}
+}
+
+void serialEvent()
+{
+	while (Serial.available())
+	{
+		recData[counter] = (char)Serial.read();
+		if(counter == 0 && recData[0] != 0x55)
 		return;
-	Serial.print("sending button -> ");
-	Serial.println(current);
-  sendMessageToAIO(current);
-	last = current;
+		counter++;
+		if(counter == 8)
+		{
+			counter = 0;
+			sign = true;
+		}
+		if(sign)
+		{
+			sign = 0;
+			if(recData[0] == 0x55 && recData[8] == 0x58)
+			{
+				switch (recData[1])
+				{
+					case 0x01:
+						for (size_t i = 0; i < 6; i++)
+						{
+							sensorData[i] = recData[i+2];
+						}
+						break;
+					case 0x02:
+						timeRequest = true;
+						break;
+					case 0x03:
+						alarm = true;
+						break;
+					default:
+						break;
+				}
+			}
+		}
+	}
 }
