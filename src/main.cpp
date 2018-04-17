@@ -1,101 +1,108 @@
 #include "ThingSpeak.h"
 #include "config.h"
+#include <time.h>
 
-int current = 0;
-int last = 0;
+int timer0flag = 1;
 
-char recData[9];
+int recData[9] = {1,2,3,4,5,6,7,8,9};
 int counter = 0;
-int sensorData[6];
+int sensorData[6] = {1,2,3,4,5,6};
 
 WiFiClient client;
 bool toggle = false;
 bool sign = false;
-bool timeRequest = false;
 bool alarm = false;
+int command_current = 0;
+int command_last = 0;
+
+int timezone = 8 * 3600;
+int dst = 0;
 
 void timer0_ISR()
 {
-	if (toggle)
-	{
-		digitalWrite(2, HIGH);
-		toggle = false;
-	}
-	else
-	{
-		digitalWrite(2, LOW);
-		toggle = true;
-	}
+	toggle = true;
 	timer0_write(ESP.getCycleCount() + 80000000L * 15);
 }
 
 void setup()
 {
-	pinMode(2, OUTPUT);
-	pinMode(BUTTON_PIN, INPUT_PULLUP);
-	pinMode(LED_PIN, OUTPUT);
 	Serial.begin(115200);
-	Serial.setDebugOutput(true);
 	setupWiFi();
 	setupAdafruitIO();
+	ThingSpeak.begin(client);
+	configTime(timezone, dst, "pool.ntp.org","time.nist.gov");
+	while(!time(nullptr))
+	{
+	 Serial.print("*");
+	 delay(1000);
+	}
+	Serial.println("\nTime response....OK");
 
 	noInterrupts();
 	timer0_isr_init();
 	timer0_attachInterrupt(timer0_ISR);
-	timer0_write(ESP.getCycleCount() + 80000000 * 15);
+	timer0_write(ESP.getCycleCount() + 80000000L * 15);
 	interrupts();
-
-	ThingSpeak.begin(client);
 }
 void loop()
 {
-	Serial.println(ThingSpeak.readIntField(commandChannelNumber, 2));
 	if (toggle)
 	{
+		toggle = false;
 		for (size_t i = 1; i < 7; i++)
 		{
 			ThingSpeak.setField(i, sensorData[(i-1)]);
 		}
+		//Serial.println("Ready to send data to ThingSpeak");
 		ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
 	}
-	io.run();
-	if (alarm == true)
-	{
-		Serial.println("Sending alarm message...");
-		sendMessageToAIO(1);
-	}
-}
 
-void serialEvent()
-{
 	while (Serial.available())
 	{
-		recData[counter] = (char)Serial.read();
-		if(counter == 0 && recData[0] != 0x55)
+		recData[counter] = (int)Serial.read();
+		if(counter == 0 && recData[0] != 253)
 		return;
 		counter++;
-		if(counter == 8)
+		if(counter == 9)
 		{
 			counter = 0;
 			sign = true;
 		}
 		if(sign)
 		{
-			sign = 0;
-			if(recData[0] == 0x55 && recData[8] == 0x58)
+			sign = false;
+			if(recData[0] == 253 && recData[8] == 254)
 			{
 				switch (recData[1])
 				{
-					case 0x01:
+					case 1:
+					{
 						for (size_t i = 0; i < 6; i++)
 						{
 							sensorData[i] = recData[i+2];
+							//Serial.print("Sensor data is ");
+							//Serial.println(sensorData[i]);
 						}
 						break;
-					case 0x02:
-						timeRequest = true;
+					}
+					case 2:
+					{
+						for (size_t i = 0; i < 3; i++)
+						{
+							time_t now = time(nullptr);
+							struct tm* p_tm = localtime(&now);
+							Serial.write(253);
+							Serial.write(1);
+							Serial.write(p_tm->tm_mday);
+							Serial.write(p_tm->tm_mon + 1);
+							Serial.write(p_tm->tm_hour);
+							Serial.write(p_tm->tm_min);
+							Serial.write(254);
+							delay(10);
+						}
 						break;
-					case 0x03:
+					}
+					case 3:
 						alarm = true;
 						break;
 					default:
@@ -103,5 +110,48 @@ void serialEvent()
 				}
 			}
 		}
+	}
+
+	command_current = ThingSpeak.readIntField(commandChannelNumber, 2);
+	if(command_current != command_last)
+	{
+		if(command_current == 1)
+		{
+			Serial.println("Command is open");
+			for (size_t i = 0; i < 2; i++)
+			{
+				Serial.write(253);
+				Serial.write(2);
+				for (size_t i = 0; i < 4; i++)
+				{
+					Serial.write(1);
+				}
+				Serial.write(254);
+			}
+		}
+		else if(command_current == 0)
+		{
+			Serial.println("Command is close");
+			for (size_t i = 0; i < 2; i++)
+			{
+				Serial.write(253);
+				Serial.write(2);
+				for (size_t i = 0; i < 4; i++)
+				{
+					Serial.write(0);
+				}
+				Serial.write(254);
+			}
+		}
+		command_last = command_current;
+	}
+
+	io.run();
+	if (alarm == true)
+	{
+		Serial.println("Sending alarm message...");
+		sendMessageToAIO(1);
+		alarm = false;
+		sendMessageToAIO(0);
 	}
 }
