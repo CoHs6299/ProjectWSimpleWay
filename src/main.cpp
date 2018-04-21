@@ -2,8 +2,6 @@
 #include "config.h"
 #include <time.h>
 
-int timer0flag = 1;
-
 int recData[9] = {1,2,3,4,5,6,7,8,9};
 int counter = 0;
 int sensorData[6] = {1,2,3,4,5,6};
@@ -34,7 +32,7 @@ void setup()
 	while(!time(nullptr))
 	{
 	 Serial.print("*");
-	 delay(1000);
+	 delay(100);
 	}
 	Serial.println("\nTime response....OK");
 
