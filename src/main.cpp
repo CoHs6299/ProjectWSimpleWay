@@ -4,7 +4,8 @@
 
 int recData[9] = {1,2,3,4,5,6,7,8,9};
 int counter = 0;
-int sensorData[6] = {1,2,3,4,5,6};
+int sensorData[6] = {26,105,20,32,28,32};
+int alarmData[6] = {1,2,3,4,5,6};
 
 WiFiClient client;
 bool toggle = false;
@@ -15,7 +16,6 @@ int command_last = 0;
 
 int timezone = 8 * 3600;
 int dst = 0;
-
 void timer0_ISR()
 {
 	toggle = true;
@@ -28,7 +28,7 @@ void setup()
 	setupWiFi();
 	setupAdafruitIO();
 	ThingSpeak.begin(client);
-	configTime(timezone, dst, "pool.ntp.org","time.nist.gov");
+	configTime(timezone, dst, "ntp1.aliyun.com","time.nist.gov");
 	while(!time(nullptr))
 	{
 	 Serial.print("*");
@@ -96,13 +96,26 @@ void loop()
 							Serial.write(p_tm->tm_hour);
 							Serial.write(p_tm->tm_min);
 							Serial.write(254);
-							delay(10);
+							delay(5);
 						}
 						break;
 					}
 					case 3:
-						alarm = true;
+					{
+						//Serial.println("Status message received");
+						for (size_t i = 0; i < 6; i++)
+						{
+							alarmData[i] = recData[i+2];
+							//Serial.println(alarmData[i]);
+							if (alarmData[i]==1)
+							{
+								alarm = true;
+							}
+							ThingSpeak.setField(i+1, alarmData[i]);
+						}
+						ThingSpeak.writeFields(alarmChannelNumber, alarmChannleKey);
 						break;
+					}
 					default:
 						break;
 				}

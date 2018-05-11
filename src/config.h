@@ -6,12 +6,13 @@
 #define IO_KEY         "7b0e850df29440a08cbe2f9434a29ba0"
 #define WIFI_SSID       "Xperia Z3"
 #define WIFI_PASS       "18615292015"
-#define BUTTON_PIN 4
-#define LED_PIN 2
+
 #define myChannelNumber 449055
 #define myWriteAPIKey "GATS3K9WRX380X84"
 #define commandChannelNumber 456947
 #define commandWriteAPIKey "45ZP5FSW9J9JUR4Z"
+#define alarmChannelNumber 489741
+#define alarmChannleKey "YLMVNO879T9TZ6GE"
 
 
 AdafruitIO_WiFi io(IO_USERNAME, IO_KEY, WIFI_SSID, WIFI_PASS);
@@ -25,7 +26,7 @@ void setupWiFi()
   while (WiFi.status() != WL_CONNECTED)
   {
    delay(500);
-   Serial.println(". ");
+   Serial.print(". ");
   }
   Serial.println("Connected to wi-fi");
 }
